@@ -1,0 +1,227 @@
+﻿using System;
+using System.Data;
+using System.Windows.Forms;
+using MySql.Data.MySqlClient;
+
+namespace Event_Ticketing_System
+{
+    public partial class PurchaseForm : Form
+    {
+        private DB_MY db = new DB_MY(); 
+
+        public PurchaseForm()
+        {
+            InitializeComponent();
+        }
+
+        private void PurchaseForm_Load(object sender, EventArgs e)
+        {
+            InitializePaymentMethods();
+        }
+
+        private void InitializePaymentMethods()
+        {
+            // Add payment method options to the ComboBox
+            paymentMethodComboBox.Items.Add("Credit Card");
+            paymentMethodComboBox.Items.Add("PayPal");
+            paymentMethodComboBox.Items.Add("Cash");
+        }
+
+        private void LoadEvents()
+        {
+            try
+            {
+                db.OpenConnection();
+                string query = "SELECT * FROM events"; 
+                MySqlDataAdapter adapter = new MySqlDataAdapter(query, db.GetConnection());
+                DataTable table = new DataTable();
+                adapter.Fill(table);
+
+                eventGrid.DataSource = table;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error loading events: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                db.CloseConnection();
+            }
+        }
+
+        private void LoadTickets(int eventId)
+        {
+            try
+            {
+                db.OpenConnection();
+
+                // Query to fetch tickets for the given event_id
+                string query = "SELECT * FROM tickets WHERE event_id = @eventId";
+                MySqlCommand cmd = new MySqlCommand(query, db.GetConnection());
+                cmd.Parameters.AddWithValue("@eventId", eventId); 
+
+                MySqlDataAdapter adapter = new MySqlDataAdapter(cmd);
+                DataTable table = new DataTable();
+                adapter.Fill(table);
+
+                ticketGrid.DataSource = table;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error loading tickets: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                db.CloseConnection();
+            }
+        }
+
+        private void loadButton_Click(object sender, EventArgs e)
+        {
+            LoadEvents();
+
+            if (eventGrid.Rows.Count > 0)
+            {
+                int firstEventId = Convert.ToInt32(eventGrid.Rows[0].Cells["id"].Value);
+                LoadTickets(firstEventId);
+            }
+            else
+            {
+                ticketGrid.DataSource = null;
+            }
+        }
+
+        private void eventGrid_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0) 
+            {
+                DataGridViewRow row = eventGrid.Rows[e.RowIndex];
+                int eventId = Convert.ToInt32(row.Cells["id"].Value);
+
+                LoadTickets(eventId);
+            }
+        }
+
+        private void registerButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (eventGrid.SelectedRows.Count == 0)
+                {
+                    MessageBox.Show("Please select an event to register.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(customerNameTextBox.Text))
+                {
+                    MessageBox.Show("Please enter your name.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                DataGridViewRow selectedRow = eventGrid.SelectedRows[0];
+                string eventName = selectedRow.Cells["name"].Value.ToString();
+
+
+                MessageBox.Show($"Registration successful for event: {eventName}!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                ClearInputFields();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error processing registration: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void purchaseButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (ticketGrid.Rows.Count == 0)
+                {
+                    MessageBox.Show("No tickets available for the selected event.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (ticketGrid.SelectedRows.Count == 0)
+                {
+                    MessageBox.Show("Please select a ticket to purchase.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!int.TryParse(quantityTextBox.Text, out int quantity) || quantity <= 0)
+                {
+                    MessageBox.Show("Please enter a valid number of tickets.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(customerNameTextBox.Text))
+                {
+                    MessageBox.Show("Please enter your name.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (paymentMethodComboBox.SelectedIndex == -1)
+                {
+                    MessageBox.Show("Please select a payment method.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                DataGridViewRow selectedRow = ticketGrid.SelectedRows[0];
+                int ticketId = Convert.ToInt32(selectedRow.Cells["id"].Value);
+                int availability = Convert.ToInt32(selectedRow.Cells["availability"].Value);
+
+                if (quantity > availability)
+                {
+                    MessageBox.Show("Not enough tickets available.", "Purchase Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                db.OpenConnection();
+
+                string insertQuery = "INSERT INTO purchases (ticket_id, quantity, customer_name, payment_method) " +
+                                     "VALUES (@ticketId, @quantity, @customerName, @paymentMethod)";
+                MySqlCommand insertCmd = new MySqlCommand(insertQuery, db.GetConnection());
+                insertCmd.Parameters.AddWithValue("@ticketId", ticketId);
+                insertCmd.Parameters.AddWithValue("@quantity", quantity);
+                insertCmd.Parameters.AddWithValue("@customerName", customerNameTextBox.Text);
+                insertCmd.Parameters.AddWithValue("@paymentMethod", paymentMethodComboBox.SelectedItem.ToString());
+                insertCmd.ExecuteNonQuery();
+
+                string updateQuery = "UPDATE tickets SET availability = availability - @quantity WHERE id = @ticketId";
+                MySqlCommand updateCmd = new MySqlCommand(updateQuery, db.GetConnection());
+                updateCmd.Parameters.AddWithValue("@quantity", quantity);
+                updateCmd.Parameters.AddWithValue("@ticketId", ticketId);
+                updateCmd.ExecuteNonQuery();
+
+                MessageBox.Show("Tickets purchased successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                LoadTickets(Convert.ToInt32(eventGrid.SelectedRows[0].Cells["id"].Value));
+                ClearInputFields();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error processing purchase: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                db.CloseConnection();
+            }
+        }
+
+        private void ClearInputFields()
+        {
+            customerNameTextBox.Clear();
+            paymentMethodComboBox.SelectedIndex = -1;
+            quantityTextBox.Clear();
+        }
+
+   
+
+        private void ticketGrid_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+
+        }
+
+      
+    }
+}
